@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIREN — Threat Vector Console</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◈</span>
+        <div>
+          <h1>SIREN</h1>
+          <p class="tagline">Threat Vector Console</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="sync-indicator" id="syncIndicator">
+          <span class="dot" id="syncDot"></span>
+          <span id="syncText">Checking status…</span>
+        </div>
+        <button id="syncBtn" class="btn">Sync Now</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <main class="layout">
+      <section class="stats-row" id="statsRow"></section>
+
+      <section class="panel timeline-panel">
+        <div class="panel-header">
+          <h2>Threat Timeline</h2>
+          <span class="panel-sub" id="timelineSub">last 30 days</span>
+        </div>
+        <div id="timelineChart" class="timeline-chart"></div>
+      </section>
+
+      <section class="panel feed-panel">
+        <div class="panel-header">
+          <h2>Threat Feed</h2>
+          <span class="panel-sub" id="feedCount"></span>
+        </div>
+
+        <div class="filters">
+          <input id="searchInput" type="search" placeholder="Search title, vendor, product…" />
+          <select id="severityFilter">
+            <option value="">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <select id="sourceFilter">
+            <option value="">All sources</option>
+          </select>
+          <select id="typeFilter">
+            <option value="">All types</option>
+          </select>
+        </div>
+
+        <div id="threatList" class="threat-list"></div>
+
+        <div class="pager">
+          <button id="prevPage" class="btn small">◀ Prev</button>
+          <span id="pageInfo"></span>
+          <button id="nextPage" class="btn small">Next ▶</button>
+        </div>
+      </section>
+
+      <aside class="panel sync-panel">
+        <div class="panel-header">
+          <h2>Ingestion Log</h2>
+        </div>
+        <div id="syncLog" class="sync-log"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
