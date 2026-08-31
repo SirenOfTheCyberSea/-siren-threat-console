@@ -70,4 +70,4 @@ dev containers, corporate egress policies) those hosts may be blocked; the
 console detects this (each source logs its own error) and falls back to a
 small bundled demo dataset, with a banner in the UI explaining why. Once
 deployed somewhere with normal outbound access, live data flows in on the
-next scheduled sync — no code changes needed.
+next scheduled sync no code changes needed.
