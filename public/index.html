@@ -45,7 +45,7 @@
         </div>
 
         <div class="filters">
-          <input id="searchInput" type="search" placeholder="Search title, vendor, product…" />
+          <input id="searchInput" type="search" placeholder="Search title, vendor, product, sector, tactic…" />
           <select id="severityFilter">
             <option value="">All severities</option>
             <option value="critical">Critical</option>
@@ -62,9 +62,33 @@
           </select>
         </div>
 
+        <div class="filters">
+          <select id="sectorFilter">
+            <option value="">All sectors</option>
+          </select>
+          <select id="companyFilter">
+            <option value="">All companies</option>
+          </select>
+          <select id="assetTypeFilter">
+            <option value="">Software + hardware</option>
+            <option value="software">Software only</option>
+            <option value="hardware">Hardware only</option>
+          </select>
+          <select id="tacticFilter">
+            <option value="">All MITRE ATT&amp;CK tactics</option>
+          </select>
+          <select id="groupBySelect">
+            <option value="">No grouping</option>
+            <option value="sector">Group by sector</option>
+            <option value="company">Group by company</option>
+            <option value="severity">Group by severity</option>
+          </select>
+          <button id="clearFiltersBtn" class="btn small">Clear filters</button>
+        </div>
+
         <div id="threatList" class="threat-list"></div>
 
-        <div class="pager">
+        <div class="pager" id="pager">
           <button id="prevPage" class="btn small">◀ Prev</button>
           <span id="pageInfo"></span>
           <button id="nextPage" class="btn small">Next ▶</button>
@@ -78,6 +102,13 @@
         <div id="syncLog" class="sync-log"></div>
       </aside>
     </main>
+  </div>
+
+  <div id="threatModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <button id="modalClose" class="modal-close" aria-label="Close">✕</button>
+      <div id="modalBody"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>

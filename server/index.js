@@ -3,7 +3,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { listThreats, getStats, getTimeline } from "./queries.js";
+import { listThreats, listThreatsGrouped, getStats, getTimeline } from "./queries.js";
 import { getRecentSyncLog } from "./db.js";
 import { runIngest } from "./ingest.js";
 import { startScheduler } from "./scheduler.js";
@@ -19,8 +19,18 @@ app.get("/api/health", (req, res) => {
 });
 
 app.get("/api/threats", (req, res) => {
-  const { source, severity, type, q, since, limit, offset } = req.query;
-  res.json(listThreats({ source, severity, type, q, since, limit, offset }));
+  const { source, severity, type, q, since, sector, company, assetType, tactic, limit, offset } = req.query;
+  res.json(listThreats({ source, severity, type, q, since, sector, company, assetType, tactic, limit, offset }));
+});
+
+app.get("/api/threats/grouped", (req, res) => {
+  const { groupBy, source, severity, type, q, since, sector, company, assetType, tactic, perGroup, cap } = req.query;
+  if (!["sector", "company", "severity"].includes(groupBy)) {
+    return res.status(400).json({ error: "groupBy must be one of: sector, company, severity" });
+  }
+  res.json(
+    listThreatsGrouped({ groupBy, source, severity, type, q, since, sector, company, assetType, tactic, perGroup, cap })
+  );
 });
 
 app.get("/api/stats", (req, res) => {

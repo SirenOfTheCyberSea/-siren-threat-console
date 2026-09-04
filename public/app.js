@@ -1,7 +1,10 @@
 const state = {
   page: 0,
   pageSize: 25,
-  filters: { q: "", severity: "", source: "", type: "" },
+  filters: { q: "", severity: "", source: "", type: "", sector: "", company: "", assetType: "", tactic: "" },
+  groupBy: "",
+  threatsById: new Map(),
+  collapsedGroups: new Set(),
 };
 
 const el = (id) => document.getElementById(id);
@@ -23,6 +26,12 @@ async function api(path, opts) {
   return res.json();
 }
 
+function fillSelect(select, options, allLabel) {
+  const current = select.value;
+  select.innerHTML = `<option value="">${allLabel}</option>` + options;
+  select.value = current;
+}
+
 function renderStats(stats) {
   const cards = [
     { label: "Total tracked", value: stats.total, cls: "" },
@@ -30,7 +39,8 @@ function renderStats(stats) {
     { label: "New (7d)", value: stats.last7d, cls: "" },
     { label: "Critical", value: stats.bySeverity.critical || 0, cls: "critical" },
     { label: "High", value: stats.bySeverity.high || 0, cls: "high" },
-    { label: "Sources", value: stats.bySource.length, cls: "" },
+    { label: "Sectors", value: stats.bySector.length, cls: "" },
+    { label: "Companies", value: stats.byCompany.length, cls: "" },
   ];
   el("statsRow").innerHTML = cards
     .map(
@@ -38,19 +48,31 @@ function renderStats(stats) {
     )
     .join("");
 
-  const sourceSelect = el("sourceFilter");
-  const currentSource = sourceSelect.value;
-  sourceSelect.innerHTML =
-    `<option value="">All sources</option>` +
-    stats.bySource.map((s) => `<option value="${s.source}">${s.source} (${s.c})</option>`).join("");
-  sourceSelect.value = currentSource;
-
-  const typeSelect = el("typeFilter");
-  const currentType = typeSelect.value;
-  typeSelect.innerHTML =
-    `<option value="">All types</option>` +
-    stats.byType.map((t) => `<option value="${t.type}">${t.type} (${t.c})</option>`).join("");
-  typeSelect.value = currentType;
+  fillSelect(
+    el("sourceFilter"),
+    stats.bySource.map((s) => `<option value="${s.source}">${s.source} (${s.c})</option>`).join(""),
+    "All sources"
+  );
+  fillSelect(
+    el("typeFilter"),
+    stats.byType.map((t) => `<option value="${t.type}">${t.type} (${t.c})</option>`).join(""),
+    "All types"
+  );
+  fillSelect(
+    el("sectorFilter"),
+    stats.bySector.map((s) => `<option value="${escapeHtml(s.sector)}">${escapeHtml(s.sector)} (${s.c})</option>`).join(""),
+    "All sectors"
+  );
+  fillSelect(
+    el("companyFilter"),
+    stats.byCompany.map((c) => `<option value="${escapeHtml(c.company)}">${escapeHtml(c.company)} (${c.c})</option>`).join(""),
+    "All companies"
+  );
+  fillSelect(
+    el("tacticFilter"),
+    stats.byTactic.map((t) => `<option value="${escapeHtml(t.tactic)}">${escapeHtml(t.tactic)} (${t.c})</option>`).join(""),
+    "All MITRE ATT&CK tactics"
+  );
 }
 
 function renderSyncIndicator(stats) {
@@ -101,35 +123,208 @@ function renderTimeline(days) {
     .join("");
 }
 
-function threatItemHtml(t) {
-  const sev = t.severity || "unknown";
-  return `
-    <div class="threat-item ${sev}">
-      <div class="threat-item-top">
-        <span class="badge ${sev}">${sev}</span>
-        <span class="badge">${t.type}</span>
-        <span class="badge">${t.source}</span>
-        ${t.cvssScore ? `<span class="badge">CVSS ${t.cvssScore}</span>` : ""}
-      </div>
-      <div class="threat-title">
-        ${t.url ? `<a href="${t.url}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.title)}</a>` : escapeHtml(t.title)}
-      </div>
-      <div class="threat-desc">${escapeHtml(t.description || "")}</div>
-      <div class="threat-meta">
-        <span>${timeAgo(t.publishedAt)}</span>
-        ${t.vendor ? `<span>${escapeHtml(t.vendor)}${t.product ? " / " + escapeHtml(t.product) : ""}</span>` : ""}
-      </div>
-    </div>`;
-}
-
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
 }
 
+function mitreBadges(t) {
+  return (t.mitreTechniques || [])
+    .map((m) => `<span class="badge mitre" title="${escapeHtml(m.tactic)}">ATT&amp;CK ${escapeHtml(m.techniqueId)}</span>`)
+    .join("");
+}
+
+function nistBadges(t) {
+  return (t.nistControls || [])
+    .map((n) => `<span class="badge nist" title="${escapeHtml(n.name)}">NIST ${escapeHtml(n.id)}</span>`)
+    .join("");
+}
+
+function threatItemHtml(t) {
+  const sev = t.severity || "unknown";
+  return `
+    <div class="threat-item ${sev}" data-id="${t.id}" tabindex="0" role="button">
+      <div class="threat-item-top">
+        <span class="badge ${sev}">${sev}</span>
+        <span class="badge">${escapeHtml(t.type)}</span>
+        <span class="badge">${escapeHtml(t.source)}</span>
+        ${t.cvssScore ? `<span class="badge">CVSS ${t.cvssScore}</span>` : ""}
+        ${t.sector ? `<span class="badge chip" data-filter="sector" data-value="${escapeHtml(t.sector)}">${escapeHtml(t.sector)}</span>` : ""}
+        ${t.assetType && t.assetType !== "unknown" ? `<span class="badge chip" data-filter="assetType" data-value="${t.assetType}">${t.assetType}</span>` : ""}
+        ${mitreBadges(t)}
+        ${nistBadges(t)}
+      </div>
+      <div class="threat-title">${escapeHtml(t.title)}</div>
+      <div class="threat-desc">${escapeHtml(t.description || "")}</div>
+      <div class="threat-meta">
+        <span>${timeAgo(t.publishedAt)}</span>
+        ${t.vendor ? `<span class="chip" data-filter="company" data-value="${escapeHtml(t.vendor)}">${escapeHtml(t.vendor)}${t.product ? " / " + escapeHtml(t.product) : ""}</span>` : ""}
+      </div>
+    </div>`;
+}
+
+function cacheThreats(rows) {
+  for (const t of rows) state.threatsById.set(String(t.id), t);
+}
+
+function wireThreatListDelegation(container) {
+  container.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (chip) {
+      e.stopPropagation();
+      const filterKey = chip.dataset.filter;
+      state.filters[filterKey] = chip.dataset.value;
+      syncFilterControlsFromState();
+      state.page = 0;
+      loadThreats();
+      return;
+    }
+    const card = e.target.closest(".threat-item");
+    if (card) openThreatModal(card.dataset.id);
+  });
+  container.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const card = e.target.closest(".threat-item");
+    if (card) {
+      e.preventDefault();
+      openThreatModal(card.dataset.id);
+    }
+  });
+}
+
+function syncFilterControlsFromState() {
+  el("severityFilter").value = state.filters.severity;
+  el("sourceFilter").value = state.filters.source;
+  el("typeFilter").value = state.filters.type;
+  el("sectorFilter").value = state.filters.sector;
+  el("companyFilter").value = state.filters.company;
+  el("assetTypeFilter").value = state.filters.assetType;
+  el("tacticFilter").value = state.filters.tactic;
+  el("searchInput").value = state.filters.q;
+}
+
+function openThreatModal(id) {
+  const t = state.threatsById.get(String(id));
+  if (!t) return;
+  const sev = t.severity || "unknown";
+
+  const mitreRows = (t.mitreTechniques || [])
+    .map(
+      (m) => `<div class="detail-row"><span class="badge mitre">ATT&amp;CK ${escapeHtml(m.techniqueId)}</span> ${escapeHtml(m.techniqueName)} <span class="detail-dim">(${escapeHtml(m.tactic)})</span></div>`
+    )
+    .join("") || `<div class="detail-dim">No ATT&amp;CK technique inferred.</div>`;
+
+  const nistRows = (t.nistControls || [])
+    .map((n) => `<div class="detail-row"><span class="badge nist">NIST ${escapeHtml(n.id)}</span> ${escapeHtml(n.name)}</div>`)
+    .join("") || `<div class="detail-dim">No NIST control inferred.</div>`;
+
+  el("modalBody").innerHTML = `
+    <div class="threat-item-top">
+      <span class="badge ${sev}">${sev}</span>
+      <span class="badge">${escapeHtml(t.type)}</span>
+      <span class="badge">${escapeHtml(t.source)}</span>
+      ${t.cvssScore ? `<span class="badge">CVSS ${t.cvssScore}</span>` : ""}
+    </div>
+    <h2 class="modal-title">${escapeHtml(t.title)}</h2>
+    <p class="threat-desc">${escapeHtml(t.description || "No description provided by the source feed.")}</p>
+
+    <div class="modal-grid">
+      <div><span class="detail-label">Sector</span><div>${escapeHtml(t.sector || "Unknown")}</div></div>
+      <div><span class="detail-label">Company / Vendor</span><div>${escapeHtml(t.vendor || "—")}</div></div>
+      <div><span class="detail-label">Product</span><div>${escapeHtml(t.product || "—")}</div></div>
+      <div><span class="detail-label">Asset type</span><div>${escapeHtml(t.assetType || "unknown")}</div></div>
+      <div><span class="detail-label">Published</span><div>${timeAgo(t.publishedAt)}</div></div>
+      <div><span class="detail-label">Ingested</span><div>${timeAgo(t.ingestedAt + "Z")}</div></div>
+    </div>
+
+    <div class="modal-section">
+      <h3>MITRE ATT&amp;CK (inferred)</h3>
+      ${mitreRows}
+    </div>
+    <div class="modal-section">
+      <h3>NIST 800-53 controls (inferred)</h3>
+      ${nistRows}
+    </div>
+
+    ${t.url ? `<a class="btn" href="${t.url}" target="_blank" rel="noopener noreferrer">Open source reference ↗</a>` : ""}
+  `;
+  el("threatModal").classList.remove("hidden");
+}
+
+function closeModal() {
+  el("threatModal").classList.add("hidden");
+}
+
+function renderGroupHeaderHtml(group, groupBy) {
+  const label = groupBy === "company" ? group.key || "Unknown company" : group.key;
+  const collapsed = state.collapsedGroups.has(`${groupBy}:${group.key}`);
+  const truncNote = group.total > group.rows.length ? ` — showing ${group.rows.length} of ${group.total}` : "";
+  return `
+    <div class="group-header" data-group-key="${escapeHtml(group.key)}">
+      <span class="group-toggle">${collapsed ? "▶" : "▼"}</span>
+      <span class="group-title">${escapeHtml(label)}</span>
+      <span class="group-count">${group.total}${truncNote}</span>
+    </div>`;
+}
+
+async function loadGroupedThreats() {
+  const { q, severity, source, type, sector, company, assetType, tactic } = state.filters;
+  const params = new URLSearchParams({ groupBy: state.groupBy });
+  if (q) params.set("q", q);
+  if (severity) params.set("severity", severity);
+  if (source) params.set("source", source);
+  if (type) params.set("type", type);
+  if (sector) params.set("sector", sector);
+  if (company) params.set("company", company);
+  if (assetType) params.set("assetType", assetType);
+  if (tactic) params.set("tactic", tactic);
+
+  const { groups, groupBy } = await api(`/api/threats/grouped?${params}`);
+
+  let matchTotal = 0;
+  const html = groups
+    .map((g) => {
+      matchTotal += g.total;
+      cacheThreats(g.rows);
+      const groupKey = `${groupBy}:${g.key}`;
+      const collapsed = state.collapsedGroups.has(groupKey);
+      return `
+        <div class="threat-group">
+          ${renderGroupHeaderHtml(g, groupBy)}
+          <div class="group-body ${collapsed ? "hidden" : ""}">
+            ${g.rows.map(threatItemHtml).join("")}
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  el("threatList").innerHTML = groups.length ? html : `<div class="empty-state">No threats match the current filters.</div>`;
+  el("feedCount").textContent = `${matchTotal} matching in ${groups.length} groups`;
+  el("pager").classList.add("hidden");
+
+  el("threatList").querySelectorAll(".group-header").forEach((header) => {
+    header.addEventListener("click", () => {
+      const groupKey = `${state.groupBy}:${header.dataset.groupKey}`;
+      if (state.collapsedGroups.has(groupKey)) {
+        state.collapsedGroups.delete(groupKey);
+      } else {
+        state.collapsedGroups.add(groupKey);
+      }
+      header.nextElementSibling.classList.toggle("hidden");
+      header.querySelector(".group-toggle").textContent = state.collapsedGroups.has(groupKey) ? "▶" : "▼";
+    });
+  });
+}
+
 async function loadThreats() {
-  const { q, severity, source, type } = state.filters;
+  if (state.groupBy) {
+    await loadGroupedThreats();
+    return;
+  }
+  el("pager").classList.remove("hidden");
+
+  const { q, severity, source, type, sector, company, assetType, tactic } = state.filters;
   const params = new URLSearchParams({
     limit: state.pageSize,
     offset: state.page * state.pageSize,
@@ -138,8 +333,13 @@ async function loadThreats() {
   if (severity) params.set("severity", severity);
   if (source) params.set("source", source);
   if (type) params.set("type", type);
+  if (sector) params.set("sector", sector);
+  if (company) params.set("company", company);
+  if (assetType) params.set("assetType", assetType);
+  if (tactic) params.set("tactic", tactic);
 
   const { rows, total } = await api(`/api/threats?${params}`);
+  cacheThreats(rows);
 
   el("threatList").innerHTML = rows.length
     ? rows.map(threatItemHtml).join("")
@@ -174,6 +374,7 @@ async function refreshAll() {
     api("/api/sync-log?limit=30"),
   ]);
   renderStats(stats);
+  syncFilterControlsFromState();
   renderSyncIndicator(stats);
   renderBanner(stats);
   renderTimeline(timeline);
@@ -192,19 +393,33 @@ function wireControls() {
     }, 250);
   });
 
-  el("severityFilter").addEventListener("change", (e) => {
-    state.filters.severity = e.target.value;
+  const filterSelects = {
+    severityFilter: "severity",
+    sourceFilter: "source",
+    typeFilter: "type",
+    sectorFilter: "sector",
+    companyFilter: "company",
+    assetTypeFilter: "assetType",
+    tacticFilter: "tactic",
+  };
+  for (const [id, key] of Object.entries(filterSelects)) {
+    el(id).addEventListener("change", (e) => {
+      state.filters[key] = e.target.value;
+      state.page = 0;
+      loadThreats();
+    });
+  }
+
+  el("groupBySelect").addEventListener("change", (e) => {
+    state.groupBy = e.target.value;
     state.page = 0;
     loadThreats();
   });
-  el("sourceFilter").addEventListener("change", (e) => {
-    state.filters.source = e.target.value;
+
+  el("clearFiltersBtn").addEventListener("click", () => {
+    state.filters = { q: "", severity: "", source: "", type: "", sector: "", company: "", assetType: "", tactic: "" };
     state.page = 0;
-    loadThreats();
-  });
-  el("typeFilter").addEventListener("change", (e) => {
-    state.filters.type = e.target.value;
-    state.page = 0;
+    syncFilterControlsFromState();
     loadThreats();
   });
 
@@ -233,6 +448,16 @@ function wireControls() {
       await refreshAll();
     }
   });
+
+  el("modalClose").addEventListener("click", closeModal);
+  el("threatModal").addEventListener("click", (e) => {
+    if (e.target.id === "threatModal") closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
+  });
+
+  wireThreatListDelegation(el("threatList"));
 }
 
 wireControls();

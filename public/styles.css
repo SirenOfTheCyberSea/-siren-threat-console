@@ -144,7 +144,11 @@ body {
   border-radius: var(--radius);
   padding: 10px 12px;
   background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
 }
+.threat-item:hover { border-color: var(--accent-dim); }
+.threat-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .threat-item.critical { border-left-color: var(--critical); }
 .threat-item.high { border-left-color: var(--high); }
 .threat-item.medium { border-left-color: var(--medium); }
@@ -164,12 +168,39 @@ body {
 .badge.high { color: var(--high); border-color: var(--high); }
 .badge.medium { color: var(--medium); border-color: var(--medium); }
 .badge.low { color: var(--low); border-color: var(--low); }
+.badge.mitre { color: #c792ea; border-color: #c792ea; }
+.badge.nist { color: #82aaff; border-color: #82aaff; }
+.badge.chip { cursor: pointer; }
+.badge.chip:hover { background: var(--bg-panel); color: var(--accent); border-color: var(--accent); }
 
-.threat-title { font-size: 13px; font-weight: 600; margin: 6px 0 4px; }
-.threat-title a { color: var(--text); text-decoration: none; }
-.threat-title a:hover { color: var(--accent); }
+.threat-title { font-size: 13px; font-weight: 600; margin: 6px 0 4px; color: var(--text); }
 .threat-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; max-height: 3em; overflow: hidden; }
 .threat-meta { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
+.threat-meta .chip { cursor: pointer; text-decoration: underline dotted; }
+.threat-meta .chip:hover { color: var(--accent); }
+
+.threat-group + .threat-group { margin-top: 4px; }
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text);
+}
+.group-header:hover { border-color: var(--accent-dim); }
+.group-toggle { color: var(--accent); font-size: 10px; width: 10px; }
+.group-title { flex: 1; }
+.group-count { color: var(--text-dim); text-transform: none; letter-spacing: 0; font-size: 11px; }
+.group-body { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 4px; }
+
+.pager.hidden { display: none; }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; font-size: 12px; color: var(--text-dim); }
 
@@ -185,3 +216,60 @@ body {
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
 }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 14, 0.7);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-content {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 640px;
+  width: 100%;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+}
+.modal-close:hover { color: var(--accent); }
+
+.modal-title { font-size: 17px; margin: 12px 0 8px; color: var(--text); }
+
+.modal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); display: block; margin-bottom: 3px; }
+
+.modal-section { margin-top: 18px; }
+.modal-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin: 0 0 8px; }
+.detail-row { font-size: 13px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.detail-dim { color: var(--text-dim); font-size: 12px; }
+
+.modal-content .btn { margin-top: 20px; display: inline-block; text-decoration: none; }
