@@ -67,6 +67,55 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_threats_asset_type ON threats(asset_type);
 `);
 
+// --- Prepared statements, created once and reused ------------------------
+// (rather than re-preparing on every call, which churns through native
+// Statement objects and can crash better-sqlite3 during process teardown —
+// see the shutdown handling below).
+const statements = {
+  findThreatId: db.prepare(`SELECT id FROM threats WHERE source = ? AND external_id = ?`),
+  upsertThreat: db.prepare(`
+    INSERT INTO threats (
+      source, external_id, type, title, description, severity, cvss_score, vendor, product, url,
+      published_at, raw, sector, asset_type, mitre_tactics, mitre_techniques, nist_controls
+    )
+    VALUES (
+      @source, @external_id, @type, @title, @description, @severity, @cvss_score, @vendor, @product, @url,
+      @published_at, @raw, @sector, @asset_type, @mitre_tactics, @mitre_techniques, @nist_controls
+    )
+    ON CONFLICT(source, external_id) DO UPDATE SET
+      title = excluded.title,
+      description = excluded.description,
+      severity = excluded.severity,
+      cvss_score = excluded.cvss_score,
+      vendor = excluded.vendor,
+      product = excluded.product,
+      url = excluded.url,
+      published_at = excluded.published_at,
+      raw = excluded.raw,
+      sector = excluded.sector,
+      asset_type = excluded.asset_type,
+      mitre_tactics = excluded.mitre_tactics,
+      mitre_techniques = excluded.mitre_techniques,
+      nist_controls = excluded.nist_controls
+  `),
+  selectUnenriched: db.prepare(`
+    SELECT id, source, external_id AS externalId, type, title, description, severity, vendor, product
+    FROM threats WHERE sector IS NULL
+  `),
+  updateEnrichment: db.prepare(`
+    UPDATE threats
+    SET sector = @sector, asset_type = @asset_type, mitre_tactics = @mitre_tactics,
+        mitre_techniques = @mitre_techniques, nist_controls = @nist_controls
+    WHERE id = @id
+  `),
+  insertSyncLog: db.prepare(`
+    INSERT INTO sync_log (source, status, message, items_fetched, items_new)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  recentSyncLog: db.prepare(`SELECT * FROM sync_log ORDER BY ran_at DESC LIMIT ?`),
+  countThreats: db.prepare(`SELECT COUNT(*) AS c FROM threats`),
+};
+
 /**
  * Upsert a normalized threat record. Returns true if it was a new row.
  * Sector / asset-type / MITRE ATT&CK / NIST tags are computed here so every
@@ -94,35 +143,8 @@ export function upsertThreat(threat) {
     mitre_techniques: JSON.stringify(mitreTechniques),
     nist_controls: JSON.stringify(nistControls),
   };
-  const existing = db
-    .prepare(`SELECT id FROM threats WHERE source = ? AND external_id = ?`)
-    .get(row.source, row.external_id);
-
-  db.prepare(`
-    INSERT INTO threats (
-      source, external_id, type, title, description, severity, cvss_score, vendor, product, url,
-      published_at, raw, sector, asset_type, mitre_tactics, mitre_techniques, nist_controls
-    )
-    VALUES (
-      @source, @external_id, @type, @title, @description, @severity, @cvss_score, @vendor, @product, @url,
-      @published_at, @raw, @sector, @asset_type, @mitre_tactics, @mitre_techniques, @nist_controls
-    )
-    ON CONFLICT(source, external_id) DO UPDATE SET
-      title = excluded.title,
-      description = excluded.description,
-      severity = excluded.severity,
-      cvss_score = excluded.cvss_score,
-      vendor = excluded.vendor,
-      product = excluded.product,
-      url = excluded.url,
-      published_at = excluded.published_at,
-      raw = excluded.raw,
-      sector = excluded.sector,
-      asset_type = excluded.asset_type,
-      mitre_tactics = excluded.mitre_tactics,
-      mitre_techniques = excluded.mitre_techniques,
-      nist_controls = excluded.nist_controls
-  `).run(row);
+  const existing = statements.findThreatId.get(row.source, row.external_id);
+  statements.upsertThreat.run(row);
 
   return !existing;
 }
@@ -132,26 +154,13 @@ export function upsertThreat(threat) {
  * (sector IS NULL). Safe to call on every boot — it's a no-op once caught up.
  */
 export function backfillEnrichment() {
-  const rows = db
-    .prepare(
-      `SELECT id, source, external_id AS externalId, type, title, description, severity, vendor, product
-       FROM threats WHERE sector IS NULL`
-    )
-    .all();
-
+  const rows = statements.selectUnenriched.all();
   if (!rows.length) return 0;
-
-  const update = db.prepare(`
-    UPDATE threats
-    SET sector = @sector, asset_type = @asset_type, mitre_tactics = @mitre_tactics,
-        mitre_techniques = @mitre_techniques, nist_controls = @nist_controls
-    WHERE id = @id
-  `);
 
   const applyAll = db.transaction((items) => {
     for (const item of items) {
       const { sector, assetType, mitreTactics, mitreTechniques, nistControls } = enrichThreat(item);
-      update.run({
+      statements.updateEnrichment.run({
         id: item.id,
         sector,
         asset_type: assetType,
@@ -169,16 +178,37 @@ export function backfillEnrichment() {
 backfillEnrichment();
 
 export function logSync({ source, status, message = null, itemsFetched = 0, itemsNew = 0 }) {
-  db.prepare(`
-    INSERT INTO sync_log (source, status, message, items_fetched, items_new)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(source, status, message, itemsFetched, itemsNew);
+  statements.insertSyncLog.run(source, status, message, itemsFetched, itemsNew);
 }
 
 export function getRecentSyncLog(limit = 20) {
-  return db.prepare(`SELECT * FROM sync_log ORDER BY ran_at DESC LIMIT ?`).all(limit);
+  return statements.recentSyncLog.all(limit);
 }
 
 export function countThreats() {
-  return db.prepare(`SELECT COUNT(*) AS c FROM threats`).get().c;
+  return statements.countThreats.get().c;
+}
+
+// better-sqlite3 finalizes all prepared statements synchronously inside
+// close(). Without this, an abrupt process exit (Ctrl-C, `node --watch`
+// restarting on a file change, a supervisor sending SIGTERM) can leave
+// Statement objects to be finalized by GC *after* Node has already torn
+// down the environment, which crashes the process natively. Closing
+// explicitly on the way out avoids that race.
+let closed = false;
+function closeDb() {
+  if (closed) return;
+  closed = true;
+  try {
+    db.close();
+  } catch {
+    // already closed
+  }
+}
+process.once("exit", closeDb);
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    closeDb();
+    process.exit(0);
+  });
 }

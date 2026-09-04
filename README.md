@@ -35,6 +35,11 @@ npm run ingest   # one-off sync from the CLI
 curl -X POST http://localhost:3000/api/ingest
 ```
 
+For development, `npm run dev` runs the server under `node --watch-path=server`
+so it restarts on code changes — scoped to `server/` so the SQLite file
+under `data/` (which ingestion writes to constantly) doesn't itself trigger
+restarts.
+
 ## Architecture
 
 ```
