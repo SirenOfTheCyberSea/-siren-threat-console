@@ -35,10 +35,14 @@ npm run ingest   # one-off sync from the CLI
 curl -X POST http://localhost:3000/api/ingest
 ```
 
-For development, `npm run dev` runs the server under `node --watch-path=server`
-so it restarts on code changes — scoped to `server/` so the SQLite file
-under `data/` (which ingestion writes to constantly) doesn't itself trigger
-restarts.
+For development, `npm run dev` runs the server under `nodemon` (watching only
+`server/`) so it restarts on code changes. It deliberately does **not** use
+Node's built-in `--watch` flag: `better-sqlite3` is a native addon, and
+Node's `--watch` mode has a known incompatibility with native addon cleanup
+hooks that can crash the process (`Assertion failed: (env) != nullptr` in
+`node::RemoveEnvironmentCleanupHook`) — nodemon avoids this because it
+restarts by spawning a genuine new OS process each time instead of
+reinitializing the module in place.
 
 ## Architecture
 

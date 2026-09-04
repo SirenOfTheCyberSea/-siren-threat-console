@@ -7,7 +7,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch-path=server server/index.js",
+    "dev": "nodemon --watch server --ext js server/index.js",
     "ingest": "node server/ingest.js"
   },
   "dependencies": {
@@ -16,5 +16,8 @@
     "express": "^4.21.2",
     "fast-xml-parser": "^4.5.1",
     "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
   }
 }
