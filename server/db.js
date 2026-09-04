@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { enrichThreat } from "./enrich.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "data");
@@ -47,10 +48,33 @@ db.exec(`
   );
 `);
 
+// --- Migration: add enrichment columns to pre-existing databases ---------
+const existingColumns = new Set(db.prepare(`PRAGMA table_info(threats)`).all().map((c) => c.name));
+const NEW_COLUMNS = {
+  sector: "TEXT",
+  asset_type: "TEXT",
+  mitre_tactics: "TEXT",
+  mitre_techniques: "JSON",
+  nist_controls: "JSON",
+};
+for (const [name, decl] of Object.entries(NEW_COLUMNS)) {
+  if (!existingColumns.has(name)) {
+    db.exec(`ALTER TABLE threats ADD COLUMN ${name} ${decl}`);
+  }
+}
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_threats_sector ON threats(sector);
+  CREATE INDEX IF NOT EXISTS idx_threats_asset_type ON threats(asset_type);
+`);
+
 /**
  * Upsert a normalized threat record. Returns true if it was a new row.
+ * Sector / asset-type / MITRE ATT&CK / NIST tags are computed here so every
+ * ingestion path (live sources, demo seed) gets them for free.
  */
 export function upsertThreat(threat) {
+  const { sector, assetType, mitreTactics, mitreTechniques, nistControls } = enrichThreat(threat);
+
   const row = {
     source: threat.source,
     external_id: threat.externalId,
@@ -64,14 +88,25 @@ export function upsertThreat(threat) {
     url: threat.url || null,
     published_at: threat.publishedAt,
     raw: threat.raw ? JSON.stringify(threat.raw) : null,
+    sector,
+    asset_type: assetType,
+    mitre_tactics: mitreTactics,
+    mitre_techniques: JSON.stringify(mitreTechniques),
+    nist_controls: JSON.stringify(nistControls),
   };
   const existing = db
     .prepare(`SELECT id FROM threats WHERE source = ? AND external_id = ?`)
     .get(row.source, row.external_id);
 
   db.prepare(`
-    INSERT INTO threats (source, external_id, type, title, description, severity, cvss_score, vendor, product, url, published_at, raw)
-    VALUES (@source, @external_id, @type, @title, @description, @severity, @cvss_score, @vendor, @product, @url, @published_at, @raw)
+    INSERT INTO threats (
+      source, external_id, type, title, description, severity, cvss_score, vendor, product, url,
+      published_at, raw, sector, asset_type, mitre_tactics, mitre_techniques, nist_controls
+    )
+    VALUES (
+      @source, @external_id, @type, @title, @description, @severity, @cvss_score, @vendor, @product, @url,
+      @published_at, @raw, @sector, @asset_type, @mitre_tactics, @mitre_techniques, @nist_controls
+    )
     ON CONFLICT(source, external_id) DO UPDATE SET
       title = excluded.title,
       description = excluded.description,
@@ -81,11 +116,57 @@ export function upsertThreat(threat) {
       product = excluded.product,
       url = excluded.url,
       published_at = excluded.published_at,
-      raw = excluded.raw
+      raw = excluded.raw,
+      sector = excluded.sector,
+      asset_type = excluded.asset_type,
+      mitre_tactics = excluded.mitre_tactics,
+      mitre_techniques = excluded.mitre_techniques,
+      nist_controls = excluded.nist_controls
   `).run(row);
 
   return !existing;
 }
+
+/**
+ * Recomputes enrichment for rows stored before this feature existed
+ * (sector IS NULL). Safe to call on every boot — it's a no-op once caught up.
+ */
+export function backfillEnrichment() {
+  const rows = db
+    .prepare(
+      `SELECT id, source, external_id AS externalId, type, title, description, severity, vendor, product
+       FROM threats WHERE sector IS NULL`
+    )
+    .all();
+
+  if (!rows.length) return 0;
+
+  const update = db.prepare(`
+    UPDATE threats
+    SET sector = @sector, asset_type = @asset_type, mitre_tactics = @mitre_tactics,
+        mitre_techniques = @mitre_techniques, nist_controls = @nist_controls
+    WHERE id = @id
+  `);
+
+  const applyAll = db.transaction((items) => {
+    for (const item of items) {
+      const { sector, assetType, mitreTactics, mitreTechniques, nistControls } = enrichThreat(item);
+      update.run({
+        id: item.id,
+        sector,
+        asset_type: assetType,
+        mitre_tactics: mitreTactics,
+        mitre_techniques: JSON.stringify(mitreTechniques),
+        nist_controls: JSON.stringify(nistControls),
+      });
+    }
+  });
+  applyAll(rows);
+
+  return rows.length;
+}
+
+backfillEnrichment();
 
 export function logSync({ source, status, message = null, itemsFetched = 0, itemsNew = 0 }) {
   db.prepare(`

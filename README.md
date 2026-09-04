@@ -54,10 +54,35 @@ public/                  Static dashboard (vanilla HTML/CSS/JS, no build step)
 Threats are deduped and upserted on `(source, external_id)`, so re-running
 ingestion is safe and only new/changed items move the "new" counters.
 
+### Sector / company / MITRE ATT&CK / NIST tagging
+
+None of the ingested feeds carry sector, asset-type, MITRE ATT&CK, or NIST
+800-53 classifications, so `server/enrich.js` + `server/mitreNist.js` derive
+a best-effort tag for each threat from keyword matching against its
+title/description/vendor/product at ingest time (see `upsertThreat` in
+`server/db.js`). These are heuristics for triage and grouping, not an
+authoritative classification — labeled as "(inferred)" in the UI.
+
+- **Sector** — one of CISA's 16 critical infrastructure sectors, guessed
+  from the vendor and text (defaults to "Information Technology").
+- **Asset type** — `software` / `hardware` / `unknown`, guessed from
+  keywords (firmware, router, appliance… vs. application, plugin, OS…).
+- **MITRE ATT&CK** — up to 4 technique/tactic guesses from a keyword
+  rule table, with feed-specific defaults (e.g. CISA KEV entries default to
+  Initial Access / T1190 since inclusion implies active exploitation).
+- **NIST 800-53** — a small set of relevant control IDs derived from the
+  threat's type, severity, and inferred ATT&CK tactics.
+
+The threat feed UI lets you click any card to see the full detail
+(including these tags), group the feed by sector/company/severity, and
+filter/search by software vs. hardware or by ATT&CK tactic — click a
+sector/company tag on a card to filter to it directly.
+
 ## API
 
-- `GET /api/threats?source=&severity=&type=&q=&since=&limit=&offset=`
-- `GET /api/stats`
+- `GET /api/threats?source=&severity=&type=&q=&since=&sector=&company=&assetType=&tactic=&limit=&offset=`
+- `GET /api/threats/grouped?groupBy=sector|company|severity&...same filters as above&perGroup=&cap=`
+- `GET /api/stats` — now also returns `bySector`, `byCompany`, `byAssetType`, `byTactic`
 - `GET /api/timeline?days=30`
 - `GET /api/sync-log?limit=20`
 - `POST /api/ingest` — trigger a sync immediately
